@@ -66,23 +66,26 @@ class SubstanceAbuseRiskPredictor:
             "Used multiple times daily": 6
         }
         
-        # Define gender weights
+        # Define gender weights - reduced impact
         self.gender_weights = {
-            "Male": 1.2,
+            "Male": 1.1,
             "Female": 1.0,
-            "Other": 1.1
+            "Other": 1.05
         }
         
-        # Define race weights
+        # Define race weights - reduced impact
         self.race_weights = {
-            "Black": 1.15,
-            "White": 1.10,
-            "Asian": 1.05,
-            "Hispanic": 1.08,
-            "Native American": 1.12,
-            "Pacific Islander": 1.07,
+            "Black": 1.08,
+            "White": 1.05,
+            "Asian": 1.02,
+            "Hispanic": 1.04,
+            "Native American": 1.06,
+            "Pacific Islander": 1.03,
             "Other": 1.00
         }
+        
+        # Maximum risk score (prevents reaching 1.0 in most cases)
+        self.max_risk_score = 0.95
         
     def calculate_frequency_risk(self, user_age, actual_visits, expected_visits, drug_name):
         """
@@ -99,11 +102,11 @@ class SubstanceAbuseRiskPredictor:
         """
         # Determine age factor (higher risk for younger individuals)
         if user_age < 25:
-            age_factor = 1.3
+            age_factor = 1.2  # Reduced from 1.3
         elif user_age < 35:
-            age_factor = 1.2
+            age_factor = 1.15  # Reduced from 1.2
         elif user_age < 50:
-            age_factor = 1.1
+            age_factor = 1.05  # Reduced from 1.1
         else:
             age_factor = 1.0
             
@@ -119,7 +122,7 @@ class SubstanceAbuseRiskPredictor:
         # Calculate deviation from expected visits
         visit_deviation = actual_visits - expected_visits
             
-        # Apply drug weight factor
+        # Apply drug weight factor - reduced impact
         drug_weight = self.drug_weights.get(drug_name, 1.0)
         
         # Calculate base frequency risk
@@ -128,19 +131,19 @@ class SubstanceAbuseRiskPredictor:
             frequency_risk = 0.05
         elif visit_deviation == 1:
             # Just 1 visit above expected
-            frequency_risk = 0.15
+            frequency_risk = 0.12  # Reduced from 0.15
         elif visit_deviation == 2:
             # 2 visits above expected
-            frequency_risk = 0.25
+            frequency_risk = 0.20  # Reduced from 0.25
         elif visit_deviation <= 4:
             # 3-4 visits above expected
-            frequency_risk = 0.4
+            frequency_risk = 0.35  # Reduced from 0.4
         else:
-            # 5+ more visits than expected
-            frequency_risk = 0.5 + min(0.4, (visit_deviation - 4) * 0.08)
+            # 5+ more visits than expected - capped at 0.80
+            frequency_risk = 0.45 + min(0.35, (visit_deviation - 4) * 0.06)
             
-        # Apply age and drug factors
-        frequency_risk = min(0.95, frequency_risk * age_factor * (drug_weight / 2))
+        # Apply age and drug factors with dampened effect
+        frequency_risk = min(0.85, frequency_risk * age_factor * (drug_weight / 2.5))
         
         return frequency_risk
     
@@ -163,23 +166,23 @@ class SubstanceAbuseRiskPredictor:
         # Get race weight
         race_weight = self.race_weights.get(race, 1.0)
         
-        # Calculate age weight
+        # Calculate age weight - reduced impact
         if age < 18:
-            age_weight = 0.7  # Lower for minors due to supervision
+            age_weight = 0.8  # Increased from 0.7 (less extreme reduction)
         elif age < 25:
-            age_weight = 1.3  # Highest for 18-24
+            age_weight = 1.2  # Reduced from 1.3
         elif age < 35:
-            age_weight = 1.2
+            age_weight = 1.1  # Reduced from 1.2
         elif age < 50:
-            age_weight = 1.1
+            age_weight = 1.05  # Reduced from 1.1
         else:
             age_weight = 1.0
         
         # Apply demographic weights
         adjusted_risk = base_risk * gender_weight * race_weight * age_weight
         
-        # Ensure risk stays between 0 and 1
-        return min(1.0, adjusted_risk)
+        # Ensure risk stays between 0 and maximum risk score
+        return min(self.max_risk_score, adjusted_risk)
     
     def calculate_direct_risk(self, drug_name, usage_level):
         """
@@ -200,26 +203,26 @@ class SubstanceAbuseRiskPredictor:
         if usage_level == 0:
             return 0.0
             
-        # For daily use (levels 5-6), high base risk
+        # For daily use (levels 5-6), high base risk but less extreme
         if usage_level >= 5:
             # Start with high base risk for daily use
-            base_risk = 0.7
+            base_risk = 0.65  # Reduced from 0.7
             # Add additional risk based on drug weight
-            additional_risk = 0.3 * (drug_weight / 3.5)  # Normalize by max weight
-            risk = min(1.0, base_risk + additional_risk)
+            additional_risk = 0.25 * (drug_weight / 3.5)  # Reduced from 0.3
+            risk = min(0.90, base_risk + additional_risk)
         else:
             # For non-daily use, gradual risk scale
             # Apply exponential scaling to usage with drug weight
-            risk = (usage_level / 6.0) * drug_weight * (1.1 ** usage_level) / 3.5
-            # Cap at 0.65 for non-daily use
-            risk = min(0.65, risk)
+            risk = (usage_level / 6.0) * drug_weight * (1.08 ** usage_level) / 3.5  # Reduced from 1.1
+            # Cap at 0.60 for non-daily use
+            risk = min(0.60, risk)  # Reduced from 0.65
             
         return risk
     
     def calculate_ml_based_risk(self, drug_use_data, usage_frequency=None):
         """
         Calculate risk based on the approach from model 2, with focus on repetition patterns
-        rather than just the number of substances.
+        and number of substances used.
         
         Parameters:
         - drug_use_data: Dictionary with drug use information
@@ -238,6 +241,16 @@ class SubstanceAbuseRiskPredictor:
         # If no substances are used, risk is zero
         if substances_used == 0:
             return 0.0
+        
+        # IMPROVED: Base risk on number of substances with a more gradual scale
+        if substances_used == 1:
+            substances_base_risk = 0.15  # Single substance - low risk
+        elif substances_used <= 3:
+            substances_base_risk = 0.30  # 2-3 substances - moderate risk
+        elif substances_used <= 5:
+            substances_base_risk = 0.50  # 4-5 substances - high risk
+        else:
+            substances_base_risk = 0.70  # 6+ substances - very high risk
             
         # Identify high-risk substances
         high_risk_drugs = ['Heroin', 'Fentanyl', 'Crack', 'Methamphetamine', 'Cocaine']
@@ -246,7 +259,8 @@ class SubstanceAbuseRiskPredictor:
         # Focus on how frequently drugs are used rather than just the count
         repetition_score = 0
         drug_count = 0
-        high_risk_use = False
+        high_risk_count = 0
+        daily_use_count = 0
         
         for drug, used in drug_use_data.items():
             if not used:
@@ -256,15 +270,23 @@ class SubstanceAbuseRiskPredictor:
             # Get usage frequency (default to 1 if not specified)
             freq = usage_frequency.get(drug, 1)
             
-            # Higher frequencies increase the score exponentially
+            # Count high risk drugs
+            if drug in high_risk_drugs:
+                high_risk_count += 1
+                
+            # Count daily use drugs
             if freq >= 5:  # Daily use
-                repetition_score += 2.5
+                daily_use_count += 1
+            
+            # Higher frequencies increase the score but less dramatically
+            if freq >= 5:  # Daily use
+                repetition_score += 2.0  # Reduced from 2.5
                 if drug in high_risk_drugs:
-                    high_risk_use = True
+                    repetition_score += 0.5  # Additional score for high-risk daily use
             elif freq >= 3:  # Monthly use
-                repetition_score += 1.0
+                repetition_score += 0.8  # Reduced from 1.0
             else:  # Occasional use
-                repetition_score += 0.5
+                repetition_score += 0.4  # Reduced from 0.5
         
         # Calculate average repetition per drug
         if drug_count > 0:
@@ -272,34 +294,42 @@ class SubstanceAbuseRiskPredictor:
         else:
             avg_repetition = 0
             
-        # Base risk depends on repetition patterns
+        # Calculate repetition risk - less extreme scaling
         if avg_repetition > 2.0:
             # Heavy repetitive use
-            base_risk = 0.65
+            repetition_risk = 0.60  # Reduced from 0.65
         elif avg_repetition > 1.5:
             # Moderate to heavy repetitive use
-            base_risk = 0.5
+            repetition_risk = 0.45  # Reduced from 0.5
         elif avg_repetition > 1.0:
             # Moderate repetitive use
-            base_risk = 0.35
+            repetition_risk = 0.30  # Reduced from 0.35
         else:
             # Light repetitive use
-            base_risk = 0.2
+            repetition_risk = 0.15  # Reduced from 0.2
             
-        # Number of substances is a secondary factor - multiple substances increase risk, but not as much
-        substance_factor = 1.0 + (substances_used - 1) * 0.1  # +10% per additional substance
-        
-        # Cap the substance factor for multiple substances
-        substance_factor = min(1.5, substance_factor)
-        
-        # High risk substance with daily use is a significant concern
-        if high_risk_use:
-            high_risk_adjustment = 0.15
+        # Calculate high risk adjustment
+        if high_risk_count >= 2:
+            high_risk_adjustment = 0.12
+        elif high_risk_count == 1:
+            high_risk_adjustment = 0.08
         else:
             high_risk_adjustment = 0
             
-        # Calculate final risk
-        return min(0.9, base_risk * substance_factor + high_risk_adjustment)
+        # Daily use adjustment
+        daily_use_adjustment = min(0.10, daily_use_count * 0.03)
+            
+        # Calculate final ML-based risk as weighted combination
+        # This balances substance count, repetition patterns, and high-risk drug use
+        ml_risk = (
+            0.4 * substances_base_risk + 
+            0.4 * repetition_risk + 
+            high_risk_adjustment +
+            daily_use_adjustment
+        )
+        
+        # Cap the final ML risk
+        return min(0.85, ml_risk)
     
     def categorize_risk(self, risk_index):
         """
@@ -407,14 +437,14 @@ class SubstanceAbuseRiskPredictor:
         if actual_visits > expected_visits:
             base_risk = (
                 0.4 * direct_risk +     # Direct risk from model 1
-                0.25 * ml_risk +        # ML-based risk from model 2
-                0.35 * frequency_risk   # Increased weight for pharmacy visit frequency
+                0.3 * ml_risk +         # ML-based risk from model 2 (increased weight)
+                0.3 * frequency_risk    # Slightly reduced weight for pharmacy visit frequency
             )
         else:
             base_risk = (
                 0.45 * direct_risk +    # Direct risk from model 1
-                0.35 * ml_risk +        # ML-based risk from model 2
-                0.20 * frequency_risk   # Lower weight when visits are as expected
+                0.4 * ml_risk +         # ML-based risk from model 2 (increased weight)
+                0.15 * frequency_risk   # Lower weight when visits are as expected
             )
         
         # 5. Apply demographic factors
@@ -546,6 +576,7 @@ def display_results(result):
     print(f"- Direct drug risk: {result['components']['direct_risk']:.4f}")
     print(f"- Pharmacy visit frequency risk: {result['components']['frequency_risk']:.4f}")
     print(f"- Multiple substance use risk: {result['components']['ml_risk']:.4f}")
+    print(f"- Combined base risk: {result['components']['base_risk']:.4f}")
     
     print(f"\nAssessment Date: {result['assessment_date']}")
     
