@@ -40,9 +40,23 @@ drug_usage_cols = ['Alcohol', 'Amphet', 'Amyl', 'Benzos', 'Caff', 'Cannabis',
                    'Choc', 'Coke', 'Crack', 'Ecstasy', 'Heroin', 'Ketamine', 
                    'Legalh', 'LSD', 'Meth', 'Mushrooms', 'Nicotine', 'Semer', 'VSA']
 
+# Map drug usage levels from 'CL0' to 'CL6' to numeric 0–6
+usage_mapping = {
+    'CL0': 0, 'CL1': 1, 'CL2': 2, 'CL3': 3,
+    'CL4': 4, 'CL5': 5, 'CL6': 6
+}
+
+for col in drug_usage_cols:
+    if col in df.columns:
+        df[col] = df[col].map(usage_mapping)
+
+# Compute correlation matrix
+numeric_drugs = df[drug_usage_cols]
+corr = numeric_drugs.corr()
+
+# Plot heatmap
 plt.figure(figsize=(16, 12))
-corr = df[drug_usage_cols].apply(pd.to_numeric, errors='coerce').corr()
-sns.heatmap(corr, annot=True, cmap='coolwarm', fmt=".2f")
+sns.heatmap(corr, annot=True, cmap='coolwarm', fmt=".2f", square=True)
 plt.title('Correlation Between Drug Usage Features')
 plt.tight_layout()
 plt.show()
